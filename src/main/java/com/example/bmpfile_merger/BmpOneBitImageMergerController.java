@@ -5,262 +5,210 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.image.Image;
-import javafx.scene.image.ImageView;
-import javafx.scene.image.PixelReader;
+import javafx.scene.image.PixelWriter;
 import javafx.scene.image.WritableImage;
+import javafx.scene.image.ImageView; // Added ImageView import
 import javafx.scene.paint.Color;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
-import javax.imageio.ImageIO;
-import java.awt.*;
-import java.awt.image.BufferedImage;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.file.Files;
-import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 
 public class BmpOneBitImageMergerController {
-
 
     @FXML private Button saveButton;
     @FXML private ImageView mergedImageView;
     @FXML private Label statusLabel;
 
-    // Add this as a class field to store the dithered data
-    private int[][] currentDithered1BitData;
-    private Image bodyImage;
-    private Image borderImage;
+    // Store the loaded BMP images as custom BmpImage objects
+    private BmpImage file1Bmp; // Corresponds to 'bodyImage' in original context, but now file1.bmp
+    private BmpImage file2Bmp; // Corresponds to 'borderImage' in original context, but now file2.bmp
+
+    // Store the merged 1-bit data (0s and 1s) for saving
+    private byte[][] currentMerged1BitData;
+    private int mergedWidth;
+    private int mergedHeight;
+
     private Stage primaryStage;
-    private WritableImage currentMergedFxImage;
 
     public void setPrimaryStage(Stage stage) {
         this.primaryStage = stage;
     }
 
+    /**
+     * Handles selecting file1.bmp (referred to as "Body Image" in the UI).
+     */
     @FXML
     private void handleSelectBodyImage() {
-        File file = chooseImageFile("Select Body Image");
+        File file = chooseImageFile("Select File1.bmp (Body Image)");
         if (file != null) {
-            bodyImage = new Image(file.toURI().toString());
-            statusLabel.setText("Body Image Loaded: " + file.getName() + " (Dim: " + (int)bodyImage.getWidth() + "x" + (int)bodyImage.getHeight() + ")");
+            try {
+                file1Bmp = BmpImage.read(file);
+                statusLabel.setText("File1.bmp Loaded: " + file.getName() + " (Dim: " + file1Bmp.width + "x" + file1Bmp.height + ")");
+            } catch (IOException e) {
+                showAlert("Error Loading Image", "Could not read File1.bmp. Please ensure it's a valid 1-bit BMP file.\n" + e.getMessage());
+                file1Bmp = null;
+            }
         }
     }
 
+    /**
+     * Handles selecting file2.bmp (referred to as "Border Image" in the UI).
+     */
     @FXML
     private void handleSelectBorderImage() {
-        File file = chooseImageFile("Select Border Image");
+        File file = chooseImageFile("Select File2.bmp (Border Image)");
         if (file != null) {
-            borderImage = new Image(file.toURI().toString());
-            statusLabel.setText("Border Image Loaded: " + file.getName() + " (Dim: " + (int)borderImage.getWidth() + "x" + (int)borderImage.getHeight() + ")");
+            try {
+                file2Bmp = BmpImage.read(file);
+                statusLabel.setText("File2.bmp Loaded: " + file.getName() + " (Dim: " + file2Bmp.width + "x" + file2Bmp.height + ")");
+            } catch (IOException e) {
+                showAlert("Error Loading Image", "Could not read File2.bmp. Please ensure it's a valid 1-bit BMP file.\n" + e.getMessage());
+                file2Bmp = null;
+            }
         }
     }
 
+    /**
+     * Handles the merging logic based on the specified requirements.
+     */
     @FXML
     private void handleMergeImages() {
-        if (bodyImage == null) {
-            showAlert("Error", "Please select a Body Image first.");
+        if (file1Bmp == null) {
+            showAlert("Error", "Please select File1.bmp first.");
             return;
         }
-        if (borderImage == null) {
-            showAlert("Error", "Please select a Border Image first.");
+        if (file2Bmp == null) {
+            showAlert("Error", "Please select File2.bmp first.");
             return;
         }
 
-        int bodyWidth = (int) bodyImage.getWidth();
-        int bodyHeight = (int) bodyImage.getHeight();
-        int borderHeight = (int) borderImage.getHeight();
-        int borderWidth = (int) borderImage.getWidth();
+        // 1. Check width condition
+        if (file1Bmp.width != file2Bmp.width + 1) {
+            showAlert("Error", "Condition Failed: File1.bmp width (" + file1Bmp.width + ") must be 1 pixel greater than File2.bmp width (" + file2Bmp.width + ").");
+            return;
+        }
 
-        int mergedWidth = bodyWidth;
-        int mergedHeight = bodyHeight;
+        mergedWidth = file2Bmp.width;
+        mergedHeight = file1Bmp.height;
+        currentMerged1BitData = new byte[mergedHeight][mergedWidth]; // Stores 0s or 1s for each pixel
 
-        // Perform the pixel-by-pixel merge into a temporary 2D array of 0s and 1s
-        int[][] mergedIntermediate1BitData = new int[mergedHeight][mergedWidth];
+        int file2CurrentLineIndex = 0; // Tracks the current line in file2.bmp, with rollover
 
-        PixelReader bodyPixelReader = bodyImage.getPixelReader();
-        PixelReader borderPixelReader = borderImage.getPixelReader();
-
-        // Convert body and border pixels to 0-255 grayscale values first, for better dithering
-        double[][] bodyGrayData = convertToGrayscale(bodyPixelReader, bodyWidth, bodyHeight);
-        double[][] borderGrayData = convertToGrayscale(borderPixelReader, borderWidth, borderHeight);
-
-        // Perform pixel-by-pixel merge on grayscale data
+        // Iterate through each line of file1.bmp (from top to bottom, as per array indexing)
         for (int y = 0; y < mergedHeight; y++) {
-            for (int x = 0; x < mergedWidth; x++) {
-                double finalGrayValue = bodyGrayData[y][x];
+            // Get the raw byte data for the current row of file1.bmp
+            // Remember BMP pixel data is stored bottom-up. So, row 'y' in our top-down logic
+            // corresponds to 'file1Bmp.height - 1 - y' in the raw BMP pixel data array.
+            int file1BmpRawRowIndex = file1Bmp.height - 1 - y;
+            byte[] file1RowBytes = BmpImage.getRowBytes(file1Bmp.pixelData, file1BmpRawRowIndex, file1Bmp.paddedRowSize);
 
-                // Assuming border overlays the leftmost 'borderWidth' pixels of the body:
-                if (x < borderWidth) {
-                    int borderY = y % borderHeight;
-                    int borderX = x;
+            // Extract the last bit of the current line of file1.bmp
+            // The last bit is at (file1Bmp.width - 1)
+            int lastBitX = file1Bmp.width - 1;
+            int lastBitByteIndex = lastBitX / 8;
+            int lastBitOffsetInByte = 7 - (lastBitX % 8); // Bits are stored from MSB to LSB within a byte
+            int lastBitOfFile1Row = (file1RowBytes[lastBitByteIndex] >> lastBitOffsetInByte) & 1;
 
-                    if (borderX < borderWidth && borderY < borderHeight) {
-                        double borderGrayValue = borderGrayData[borderY][borderX];
-                        finalGrayValue = Math.min(finalGrayValue, borderGrayValue);
-                    }
+            byte[] sourceRowBytesForMerge;
+
+            if (lastBitOfFile1Row == 1) { // Last bit is WHITE (1), merge with file2.bmp
+                // Determine the line from file2.bmp, handling rollover
+                int file2BmpRawRowIndex = file2Bmp.height - 1 - (file2CurrentLineIndex % file2Bmp.height);
+                sourceRowBytesForMerge = BmpImage.getRowBytes(file2Bmp.pixelData, file2BmpRawRowIndex, file2Bmp.paddedRowSize);
+                file2CurrentLineIndex++; // Move to the next line in file2.bmp for the next potential merge
+            } else { // Last bit is BLACK (0), keep file1.bmp line as is (without its last bit)
+                sourceRowBytesForMerge = file1RowBytes;
+            }
+
+            // Populate currentMerged1BitData for the current row
+            for (int x = 0; x < mergedWidth; x++) { // Iterate up to the new mergedWidth (file2.bmp width)
+                int sourceBitX = x; // The pixel position in the source row
+                int sourceByteIndex = sourceBitX / 8;
+                int sourceBitOffsetInByte = 7 - (sourceBitX % 8);
+
+                // Ensure we don't go out of bounds for sourceRowBytesForMerge
+                // This check is important if sourceWidth (file2Bmp.width) is smaller than file1Bmp.width
+                if (sourceByteIndex < sourceRowBytesForMerge.length) {
+                    int bitValue = (sourceRowBytesForMerge[sourceByteIndex] >> sourceBitOffsetInByte) & 1;
+                    currentMerged1BitData[y][x] = (byte) bitValue;
+                } else {
+                    // This should ideally not happen if sourceWidth is handled correctly, but as a fallback
+                    currentMerged1BitData[y][x] = 0; // Default to black if data is unexpectedly missing
                 }
-                mergedIntermediate1BitData[y][x] = (int)(finalGrayValue * 255.0);
             }
         }
 
-        // Apply Floyd-Steinberg dithering
-        int[][] dithered1BitData = floydSteinbergDither(mergedIntermediate1BitData, mergedWidth, mergedHeight);
-
-        // STORE the dithered data for use in saving
-        currentDithered1BitData = dithered1BitData;
-
-        // Create WritableImage for preview from dithered data
+        // Create WritableImage for preview from the merged 1-bit data
         WritableImage mergedOutputFxImage = new WritableImage(mergedWidth, mergedHeight);
+        PixelWriter pixelWriter = mergedOutputFxImage.getPixelWriter();
         for (int y = 0; y < mergedHeight; y++) {
             for (int x = 0; x < mergedWidth; x++) {
-                Color finalColor = (dithered1BitData[y][x] == 1) ? Color.WHITE : Color.BLACK;
-                mergedOutputFxImage.getPixelWriter().setColor(x, y, finalColor);
+                Color finalColor = (currentMerged1BitData[y][x] == 1) ? Color.WHITE : Color.BLACK;
+                pixelWriter.setColor(x, y, finalColor);
             }
         }
 
-        currentMergedFxImage = mergedOutputFxImage;
-        mergedImageView.setImage(currentMergedFxImage);
-        statusLabel.setText("Images merged and dithered. Click 'Save' to convert to 1-bit BMP.");
+        mergedImageView.setImage(mergedOutputFxImage);
+        statusLabel.setText("Images merged. Click 'Save' to convert to 1-bit BMP.");
         saveButton.setVisible(true);
     }
 
-
-    private void saveAsOneBitBmp(Stage stage, WritableImage currentMergedFxImage, int width, int height) {
-        try {
-            if (this.currentMergedFxImage == null) {
-                showAlert("Error", "No merged image to save. Please merge images first.");
-                return;
-            }
-
-            // Convert JavaFX image to BufferedImage first
-            BufferedImage rgbImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-            PixelReader pixelReader = this.currentMergedFxImage.getPixelReader();
-
-            for (int y = 0; y < height; y++) {
-                for (int x = 0; x < width; x++) {
-                    Color fxColor = pixelReader.getColor(x, y);
-                    // Direct conversion - if it's white in JavaFX, make it white in BMP
-                    int rgb = fxColor.equals(Color.WHITE) ? 0xFFFFFF : 0x000000;
-                    rgbImage.setRGB(x, y, rgb);
-                }
-            }
-
-            // Convert RGB to 1-bit BMP
-            BufferedImage oneBitImage = new BufferedImage(width, height, BufferedImage.TYPE_BYTE_BINARY);
-            Graphics2D g2d = oneBitImage.createGraphics();
-            g2d.drawImage(rgbImage, 0, 0, null);
-            g2d.dispose();
-
-            FileChooser fileChooser = new FileChooser();
-            fileChooser.setTitle("Save Merged 1-bit BMP");
-            fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("BMP Image", "*.bmp"));
-            File outputFile = fileChooser.showSaveDialog(stage);
-
-            if (outputFile != null) {
-                boolean success = ImageIO.write(oneBitImage, "BMP", outputFile);
-                if (success) {
-                    statusLabel.setText("BMP saved (Method 3): " + outputFile.getAbsolutePath());
-                    System.out.println("BMP saved (Method 3): " + outputFile.getAbsolutePath());
-                    verifyBmpHeader(outputFile);
-                } else {
-                    showAlert("Error", "Failed to save BMP image.");
-                }
-            }
-
-        } catch (Exception ex) {
-            statusLabel.setText("Error saving BMP: " + ex.getMessage());
-            showAlert("Error", "Error saving BMP: " + ex.getMessage());
-            ex.printStackTrace();
-        }
-    }
-
-
-
-    // New helper to convert to grayscale 0.0-1.0
-    private double[][] convertToGrayscale(PixelReader pixelReader, int width, int height) {
-        double[][] grayData = new double[height][width];
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                grayData[y][x] = pixelReader.getColor(x, y).getBrightness(); // Returns 0.0 to 1.0
-            }
-        }
-        return grayData;
-    }
-
-    // New Dithering Algorithm
-    private int[][] floydSteinbergDither(int[][] grayData255, int width, int height) {
-        int[][] output1Bit = new int[height][width];
-        // Create a copy to modify during error diffusion
-        double[][] pixelValues = new double[height][width];
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                pixelValues[y][x] = grayData255[y][x]; // Convert back to 0-255 for processing
-            }
-        }
-
-        double threshold = 128.0; // Midpoint for black/white (0-255 scale)
-
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                double oldPixel = pixelValues[y][x];
-                int newPixel = (oldPixel > threshold) ? 255 : 0; // Quantize to black or white (0 or 255)
-                output1Bit[y][x] = (newPixel == 255) ? 1 : 0; // Store 1-bit value (1 for white, 0 for black)
-
-                double error = oldPixel - newPixel;
-
-                // Distribute error to neighbors (Floyd-Steinberg coefficients)
-                //      X   7/16
-                // 3/16 5/16 1/16
-
-                // (x+1, y)
-                if (x + 1 < width) {
-                    pixelValues[y][x + 1] += error * 7.0 / 16.0;
-                }
-                // (x-1, y+1)
-                if (x - 1 >= 0 && y + 1 < height) {
-                    pixelValues[y + 1][x - 1] += error * 3.0 / 16.0;
-                }
-                // (x, y+1)
-                if (y + 1 < height) {
-                    pixelValues[y + 1][x] += error * 5.0 / 16.0;
-                }
-                // (x+1, y+1)
-                if (x + 1 < width && y + 1 < height) {
-                    pixelValues[y + 1][x + 1] += error * 1.0 / 16.0;
-                }
-            }
-        }
-        return output1Bit;
-    }
-
+    /**
+     * Handles saving the merged image as a 1bpp BMP file.
+     */
     @FXML
     private void handleSaveImage() {
-        if (currentMergedFxImage == null) {
+        if (currentMerged1BitData == null || mergedWidth == 0 || mergedHeight == 0) {
             showAlert("Error", "No merged image to save. Please merge images first.");
             return;
         }
 
-        int width = (int) currentMergedFxImage.getWidth();
-        int height = (int) currentMergedFxImage.getHeight();
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Save Merged 1-bit BMP");
+        fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("BMP Image", "*.bmp"));
+        File outputFile = fileChooser.showSaveDialog(primaryStage);
 
-        saveAsOneBitBmp(primaryStage, currentMergedFxImage, width, height);
+        if (outputFile != null) {
+            try {
+                BmpImage.write(outputFile, currentMerged1BitData, mergedWidth, mergedHeight);
+                statusLabel.setText("BMP saved: " + outputFile.getAbsolutePath());
+                System.out.println("BMP saved: " + outputFile.getAbsolutePath());
+                verifyBmpHeader(outputFile); // Verify the header of the saved file
+            } catch (IOException ex) {
+                statusLabel.setText("Error saving BMP: " + ex.getMessage());
+                showAlert("Error", "Error saving BMP: " + ex.getMessage());
+                ex.printStackTrace();
+            }
+        }
     }
 
+    /**
+     * Helper method to open a file chooser dialog.
+     * @param title The title for the file chooser dialog.
+     * @return The selected File, or null if cancelled.
+     */
     private File chooseImageFile(String title) {
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle(title);
         fileChooser.getExtensionFilters().addAll(
-                new FileChooser.ExtensionFilter("Image Files (BMP, PNG, JPG)", "*.bmp", "*.png", "*.jpg", "*.jpeg"),
+                new FileChooser.ExtensionFilter("BMP Image", "*.bmp"),
                 new FileChooser.ExtensionFilter("All Files", "*.*")
         );
         return fileChooser.showOpenDialog(primaryStage);
     }
 
-
+    /**
+     * Displays an alert dialog.
+     * @param title The title of the alert.
+     * @param message The message content of the alert.
+     */
     private void showAlert(String title, String message) {
         Alert alert = new Alert(Alert.AlertType.ERROR);
         alert.setTitle(title);
@@ -269,23 +217,32 @@ public class BmpOneBitImageMergerController {
         alert.showAndWait();
     }
 
+    /**
+     * Verifies the header of a saved BMP file to ensure it's 1bpp.
+     * This is a utility for debugging and confirmation.
+     * @param bmpFile The BMP file to verify.
+     */
     private void verifyBmpHeader(File bmpFile) {
-        // ... (Header verification logic remains the same)
         try {
             byte[] header = new byte[54]; // Standard BMP header size
-            try (var fis = Files.newInputStream(bmpFile.toPath(), StandardOpenOption.READ)) {
-                fis.read(header);
+            try (FileInputStream fis = new FileInputStream(bmpFile)) {
+                if (fis.read(header) != 54) {
+                    System.err.println("Error: Could not read full BMP header for verification.");
+                    return;
+                }
             }
 
-            String signature = new String(Arrays.copyOfRange(header, 0, 2));
-            int fileSize = ByteBuffer.wrap(Arrays.copyOfRange(header, 2, 6)).order(ByteOrder.LITTLE_ENDIAN).getInt();
-            int pixelDataOffset = ByteBuffer.wrap(Arrays.copyOfRange(header, 10, 14)).order(ByteOrder.LITTLE_ENDIAN).getInt();
+            ByteBuffer buffer = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN);
 
-            int infoHeaderSize = ByteBuffer.wrap(Arrays.copyOfRange(header, 14, 18)).order(ByteOrder.LITTLE_ENDIAN).getInt();
-            int width = ByteBuffer.wrap(Arrays.copyOfRange(header, 18, 22)).order(ByteOrder.LITTLE_ENDIAN).getInt();
-            int height = ByteBuffer.wrap(Arrays.copyOfRange(header, 22, 26)).order(ByteOrder.LITTLE_ENDIAN).getInt();
-            short bitsPerPixel = ByteBuffer.wrap(Arrays.copyOfRange(header, 28, 30)).order(ByteOrder.LITTLE_ENDIAN).getShort();
-            int colorsUsed = ByteBuffer.wrap(Arrays.copyOfRange(header, 46, 50)).order(ByteOrder.LITTLE_ENDIAN).getInt();
+            String signature = new String(new byte[]{buffer.get(0), buffer.get(1)});
+            int fileSize = buffer.getInt(2);
+            int pixelDataOffset = buffer.getInt(10);
+            int infoHeaderSize = buffer.getInt(14);
+            int width = buffer.getInt(18);
+            int height = buffer.getInt(22);
+            short bitsPerPixel = buffer.getShort(28);
+            int compression = buffer.getInt(30);
+            int colorsUsed = buffer.getInt(46);
 
             System.out.println("\n--- BMP Header Verification for: " + bmpFile.getName() + " ---");
             System.out.println("Signature (BF Type): " + signature);
@@ -295,6 +252,7 @@ public class BmpOneBitImageMergerController {
             System.out.println("Width (biWidth): " + width);
             System.out.println("Height (biHeight): " + height);
             System.out.println("Bits Per Pixel (biBitCount): " + bitsPerPixel);
+            System.out.println("Compression (biCompression): " + compression + " (0 = BI_RGB)");
             System.out.println("Colors Used (biClrUsed): " + colorsUsed);
             System.out.println("----------------------------------------------");
 
@@ -307,8 +265,163 @@ public class BmpOneBitImageMergerController {
             if (colorsUsed != 2) {
                 System.err.println("WARNING: Expected 2 colors in palette for 1-bit BMP. Found: " + colorsUsed);
             }
+            if (compression != 0) {
+                System.err.println("WARNING: BMP is compressed. Expected uncompressed (BI_RGB).");
+            }
         } catch (IOException e) {
             System.err.println("Error reading BMP header for verification: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Inner static class to handle reading and writing of 1bpp BMP files.
+     */
+    private static class BmpImage {
+        public int width;
+        public int height;
+        public byte[] pixelData; // Raw 1bpp pixel data (bottom-up, padded)
+        public int paddedRowSize; // Size of a row including padding bytes
+
+        /**
+         * Constructor for creating a BmpImage object from raw data.
+         * Used internally when reading a file or preparing data for writing.
+         * @param width The width of the image in pixels.
+         * @param height The height of the image in pixels.
+         * @param pixelData The raw 1bpp pixel data.
+         */
+        public BmpImage(int width, int height, byte[] pixelData) {
+            this.width = width;
+            this.height = height;
+            this.paddedRowSize = ((width * 1 + 31) / 32) * 4; // Calculate padded row size for 1bpp (1 bit per pixel)
+            this.pixelData = pixelData;
+        }
+
+        /**
+         * Reads a 1bpp BMP file from the given File object.
+         * @param file The BMP file to read.
+         * @return A BmpImage object containing the image data.
+         * @throws IOException If there's an error reading the file or if it's not a valid 1bpp BMP.
+         */
+        public static BmpImage read(File file) throws IOException {
+            try (FileInputStream fis = new FileInputStream(file)) {
+                byte[] header = new byte[54]; // Standard BMP header size
+                if (fis.read(header) != 54) {
+                    throw new IOException("Invalid BMP file: header too short (expected 54 bytes).");
+                }
+
+                ByteBuffer buffer = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN);
+
+                // Verify BMP signature "BM" (0x4D42)
+                if (buffer.getShort(0) != 0x4D42) {
+                    throw new IOException("Not a valid BMP file (signature 'BM' not found).");
+                }
+
+                int dataOffset = buffer.getInt(10); // Offset to pixel data
+                int infoHeaderSize = buffer.getInt(14); // Size of info header (expected 40 for BITMAPINFOHEADER)
+                int width = buffer.getInt(18);
+                int height = buffer.getInt(22);
+                short bitsPerPixel = buffer.getShort(28);
+                int compression = buffer.getInt(30); // Compression method (0 for BI_RGB)
+
+                if (bitsPerPixel != 1) {
+                    throw new IOException("Only 1-bit BMP files are supported. Found: " + bitsPerPixel + " bpp.");
+                }
+                if (compression != 0) {
+                    throw new IOException("Compressed BMP files are not supported (only BI_RGB = 0).");
+                }
+
+                // Read color palette (2 entries for 1bpp: Black and White)
+                byte[] palette = new byte[8];
+                if (fis.read(palette) != 8) {
+                    throw new IOException("Invalid BMP file: palette too short (expected 8 bytes for 1bpp).");
+                }
+                // We expect palette to be 0x00000000 (black) and 0x00FFFFFF (white)
+
+                // Calculate padded row size for 1bpp
+                int paddedRowSize = ((width * 1 + 31) / 32) * 4;
+                int totalPixelDataSize = paddedRowSize * height;
+                byte[] pixelData = new byte[totalPixelDataSize];
+
+                // Seek to pixel data start and read
+                fis.getChannel().position(dataOffset);
+                if (fis.read(pixelData) != totalPixelDataSize) {
+                    throw new IOException("Invalid BMP file: pixel data too short (expected " + totalPixelDataSize + " bytes).");
+                }
+
+                return new BmpImage(width, height, pixelData);
+            }
+        }
+
+        /**
+         * Writes 1bpp pixel data to a BMP file.
+         * @param file The output BMP file.
+         * @param pixelBitData A 2D array of bytes (0 or 1) representing the pixels (top-down).
+         * @param width The width of the image.
+         * @param height The height of the image.
+         * @throws IOException If there's an error writing the file.
+         */
+        public static void write(File file, byte[][] pixelBitData, int width, int height) throws IOException {
+            try (FileOutputStream fos = new FileOutputStream(file)) {
+                int paddedRowSize = ((width * 1 + 31) / 32) * 4; // Calculate padded row size for 1bpp
+                int pixelDataSize = paddedRowSize * height;
+                int fileSize = 14 + 40 + 8 + pixelDataSize; // File Header + Info Header + Palette + Pixel Data
+
+                ByteBuffer buffer = ByteBuffer.allocate(fileSize).order(ByteOrder.LITTLE_ENDIAN);
+
+                // BMP File Header (14 bytes)
+                buffer.putShort((short) 0x4D42); // Signature "BM"
+                buffer.putInt(fileSize);         // Total file size
+                buffer.putInt(0);                // Reserved (set to 0)
+                buffer.putInt(14 + 40 + 8);      // Offset to pixel data (File Header + Info Header + Palette)
+
+                // BMP Info Header (40 bytes - BITMAPINFOHEADER)
+                buffer.putInt(40);               // Size of info header (40 bytes)
+                buffer.putInt(width);            // Image width
+                buffer.putInt(height);           // Image height
+                buffer.putShort((short) 1);      // Planes (must be 1)
+                buffer.putShort((short) 1);      // Bits per pixel (1 for 1bpp)
+                buffer.putInt(0);                // Compression method (0 = BI_RGB, no compression)
+                buffer.putInt(pixelDataSize);    // Image size (can be 0 for BI_RGB, but good practice to set)
+                buffer.putInt(2835);             // X pixels per meter (72 DPI = 2835 ppm)
+                buffer.putInt(2835);             // Y pixels per meter (72 DPI = 2835 ppm)
+                buffer.putInt(2);                // Colors used (2 for 1bpp: black and white)
+                buffer.putInt(0);                // Important colors (0 means all are important)
+
+                // Color Palette (8 bytes for 1bpp: Black and White)
+                // Entry 0: Black (0x00000000 BGRA)
+                buffer.putInt(0x00000000);
+                // Entry 1: White (0x00FFFFFF BGRA)
+                buffer.putInt(0x00FFFFFF);
+
+                // Pixel Data (bottom-up, padded)
+                // Iterate rows from bottom to top of our pixelBitData array
+                for (int y = height - 1; y >= 0; y--) {
+                    byte[] rowBytes = new byte[paddedRowSize];
+                    for (int x = 0; x < width; x++) {
+                        int byteIndex = x / 8;
+                        int bitIndex = 7 - (x % 8); // Bits are stored from MSB (leftmost pixel) to LSB (rightmost pixel) within a byte
+                        if (pixelBitData[y][x] == 1) { // If pixel is white (1)
+                            rowBytes[byteIndex] |= (1 << bitIndex); // Set the corresponding bit
+                        }
+                        // If pixelBitData[y][x] is 0 (black), the bit remains 0, which is the default for a new byte array
+                    }
+                    buffer.put(rowBytes); // Write the whole padded row
+                }
+
+                fos.write(buffer.array()); // Write the entire buffer to the file
+            }
+        }
+
+        /**
+         * Helper method to extract a specific row's byte data from the raw pixelData array.
+         * @param fullPixelData The complete raw pixel data array from a BmpImage.
+         * @param rowIndex The 0-based index of the row to extract (in BMP's bottom-up order).
+         * @param paddedRowSize The padded size of a single row in bytes.
+         * @return A byte array representing the specified row's pixel data.
+         */
+        public static byte[] getRowBytes(byte[] fullPixelData, int rowIndex, int paddedRowSize) {
+            int startByte = rowIndex * paddedRowSize;
+            return Arrays.copyOfRange(fullPixelData, startByte, startByte + paddedRowSize);
         }
     }
 }
