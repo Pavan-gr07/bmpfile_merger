@@ -3,41 +3,50 @@
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ScrollPane?>
 <?import javafx.scene.image.ImageView?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
 <?import javafx.scene.text.Font?>
 
-<VBox alignment="TOP_CENTER" spacing="15.0" style="-fx-padding: 20px; -fx-background-color: #f0f0f0;" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.example.bmpfile_merger.BmpOneBitImageMergerController">
-    <children>
-        <Label text="1-bit BMP Image Merger">
-            <font>
-                <Font name="System Bold" size="20.0" />
-            </font>
-            <VBox.margin>
-                <Insets bottom="10.0" />
-            </VBox.margin>
-        </Label>
-        <HBox alignment="CENTER" spacing="15.0">
+<ScrollPane fitToWidth="true" hbarPolicy="NEVER" maxHeight="1.7976931348623157E308" maxWidth="1.7976931348623157E308" prefHeight="750.0" prefWidth="950.0" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.example.bmpfile_merger.BmpOneBitImageMergerController">
+    <content>
+        <VBox alignment="TOP_CENTER" spacing="15.0" style="-fx-padding: 20px; -fx-background-color: #f0f0f0;">
             <children>
-                <Button fx:id="selectBodyBtn" mnemonicParsing="false" onAction="#handleSelectBodyImage" style="-fx-font-size: 14px; -fx-background-color: #4CAF50; -fx-text-fill: white;" text="Select Body Image" />
-                <Button fx:id="selectBorderBtn" mnemonicParsing="false" onAction="#handleSelectBorderImage" style="-fx-font-size: 14px; -fx-background-color: #2196F3; -fx-text-fill: white;" text="Select Border Image" />
+                <Label text="1-bit BMP Image Merger">
+                    <font>
+                        <Font name="System Bold" size="20.0" />
+                    </font>
+                    <VBox.margin>
+                        <Insets bottom="10.0" />
+                    </VBox.margin>
+                </Label>
+                <HBox alignment="CENTER" spacing="15.0">
+                    <children>
+                        <Button fx:id="selectBodyBtn" mnemonicParsing="false" onAction="#handleSelectBodyImage" style="-fx-font-size: 14px; -fx-background-color: #4CAF50; -fx-text-fill: white;" text="Select Body Image" />
+                        <Button fx:id="selectBorderBtn" mnemonicParsing="false" onAction="#handleSelectBorderImage" style="-fx-font-size: 14px; -fx-background-color: #2196F3; -fx-text-fill: white;" text="Select Border Image" />
+                    </children>
+                </HBox>
+                <Button fx:id="mergeButton" mnemonicParsing="false" onAction="#handleMergeImages" style="-fx-font-size: 16px; -fx-padding: 10px 20px; -fx-background-color: #FFC107; -fx-text-fill: black;" text="Merge Images &amp; Convert to 1-bit BMP" />
+                <ImageView fx:id="mergedImageView" fitWidth="800.0" pickOnBounds="true" preserveRatio="true" style="-fx-border-color: #cccccc; -fx-border-width: 1px; -fx-background-color: white;">
+                    <VBox.margin>
+                        <Insets top="10.0" />
+                    </VBox.margin>
+                </ImageView>
+                <Label fx:id="statusLabel" text="Please select images to start." textFill="#555555">
+                    <font>
+                        <Font size="12.0" />
+                    </font>
+                </Label>
+                <Button fx:id="saveButton" mnemonicParsing="false" onAction="#handleSaveImage" style="-fx-font-size: 14px; -fx-background-color: #607D8B; -fx-text-fill: white;" text="Save Merged Image as BMP" visible="false">
+                    <VBox.margin>
+                        <Insets top="10.0" />
+                    </VBox.margin>
+                </Button>
             </children>
-        </HBox>
-        <Button fx:id="mergeButton" mnemonicParsing="false" onAction="#handleMergeImages" style="-fx-font-size: 16px; -fx-padding: 10px 20px; -fx-background-color: #FFC107; -fx-text-fill: black;" text="Merge Images &amp; Convert to 1-bit BMP" />
-        <ImageView fx:id="mergedImageView" fitWidth="800.0" pickOnBounds="true" preserveRatio="true" style="-fx-border-color: #cccccc; -fx-border-width: 1px; -fx-background-color: white;" />
-        <Label fx:id="statusLabel" text="Please select images to start." textFill="#555555">
-            <font>
-                <Font size="12.0" />
-            </font>
-        </Label>
-        <Button fx:id="saveButton" mnemonicParsing="false" onAction="#handleSaveImage" style="-fx-font-size: 14px; -fx-background-color: #607D8B; -fx-text-fill: white;" text="Save Merged Image as BMP" visible="false">
-            <VBox.margin>
-                <Insets top="10.0" />
-            </VBox.margin>
-        </Button>
-    </children>
-    <padding>
-        <Insets bottom="20.0" left="20.0" right="20.0" top="20.0" />
-    </padding>
-</VBox>
+            <padding>
+                <Insets bottom="20.0" left="20.0" right="20.0" top="20.0" />
+            </padding>
+        </VBox>
+    </content>
+</ScrollPane>
