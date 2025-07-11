@@ -78,6 +78,7 @@ public class BmpOneBitImageMergerController {
     /**
      * Handles the merging logic based on the specified requirements.
      */
+
     @FXML
     private void handleMergeImages() {
         if (file1Bmp == null) {
@@ -165,6 +166,7 @@ public class BmpOneBitImageMergerController {
      */
     @FXML
     private void handleSaveImage() {
+        System.out.println(currentMerged1BitData + "currentMerged1BitData");
         if (currentMerged1BitData == null || mergedWidth == 0 || mergedHeight == 0) {
             showAlert("Error", "No merged image to save. Please merge images first.");
             return;
